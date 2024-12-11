@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import openai
 import re
+from urllib.parse import urlparse
 
 st.set_page_config(page_title="CIP Korea News Monitor", layout="wide")
 
@@ -16,42 +17,38 @@ if not api_key:
 
 openai.api_key = api_key
 
-# Media translations
-KOREAN_MEDIA_TRANSLATIONS = {
-    '조선일보': 'Chosun Ilbo',
-    '중앙일보': 'JoongAng Ilbo',
-    '동아일보': 'Dong-A Ilbo',
-    '한국경제': 'Korea Economic Daily',
-    '매일경제': 'Maeil Business News',
-    '전기신문': 'Electric Times',
-    '연합뉴스': 'Yonhap News',
-    '한겨레': 'Hankyoreh',
-    '경향신문': 'Kyunghyang Shinmun',
-    # Add more as needed
-}
+def get_english_media_name(url):
+    """Get English media name from domain"""
+    try:
+        domain = urlparse(url).netloc
+        # Remove common subdomains and .com/.co.kr
+        media_name = domain.split('.')[-2]
+        return media_name.capitalize()
+    except:
+        return domain
 
 def get_article_details(url):
     """Get detailed information from article page"""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, verify=False)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Get journalist name
         journalist = "N/A"
         journalist_patterns = [
-            soup.select_one('.journalist_name'),
-            soup.select_one('.byline'),
-            soup.select_one('.author'),
-            soup.select_one('span[class*="journalist"]'),
-            soup.select_one('div[class*="journalist"]'),
+            ('span.writer', 'text'),
+            ('div.journalist', 'text'),
+            ('p.writer', 'text'),
+            ('meta[property="article:author"]', 'content'),
+            ('span[class*="author"]', 'text'),
         ]
         
-        for pattern in journalist_patterns:
-            if pattern:
-                journalist = pattern.text.strip()
-                if '기자' in journalist:
-                    journalist = journalist.replace('기자', '').strip()
+        for selector, attr in journalist_patterns:
+            element = soup.select_one(selector)
+            if element:
+                journalist = element.get(attr) if attr == 'content' else element.text
+                journalist = re.sub(r'기자|작성자|글', '', journalist).strip()
                 break
         
         # Get date
@@ -69,13 +66,10 @@ def get_article_details(url):
             if element:
                 try:
                     date_text = element.get(attr) if attr == 'content' else element.text
-                    # Handle various date formats
-                    if 'T' in date_text:
-                        date = date_text.split('T')[0]
-                    else:
-                        # Clean date text
-                        date_text = re.sub(r'입력|수정', '', date_text).strip()
-                        date = datetime.strptime(date_text, '%Y-%m-%d').strftime('%Y-%m-%d')
+                    # Clean and standardize date
+                    date_text = re.sub(r'입력|수정|:|\.', '-', date_text)
+                    date_text = re.findall(r'\d{4}-\d{1,2}-\d{1,2}', date_text)[0]
+                    date = datetime.strptime(date_text, '%Y-%m-%d').strftime('%Y-%m-%d')
                     break
                 except:
                     continue
@@ -85,26 +79,30 @@ def get_article_details(url):
         st.error(f"Error getting article details: {str(e)}")
         return "N/A", datetime.now().strftime('%Y-%m-%d')
 
-def search_news(keyword):
-    """Enhanced Naver news search"""
-    base_url = f"https://search.naver.com/search.naver?where=news&query={keyword}"
+def search_news(keyword, start_date, end_date):
+    """Enhanced Naver news search with date filtering"""
+    base_url = (
+        f"https://search.naver.com/search.naver?"
+        f"where=news&query={keyword}&sort=1"
+        f"&ds={start_date.strftime('%Y.%m.%d')}"
+        f"&de={end_date.strftime('%Y.%m.%d')}"
+    )
     headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
-        response = requests.get(base_url, headers=headers)
+        response = requests.get(base_url, headers=headers, verify=False)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         articles = []
         for item in soup.select('.news_area'):
             title = item.select_one('.news_tit').text
             link = item.select_one('.news_tit')['href']
-            media = item.select_one('.info_group a').text
             
             # Get detailed info
             journalist, date = get_article_details(link)
             
-            # Translate media name
-            media_english = KOREAN_MEDIA_TRANSLATIONS.get(media, media)
+            # Get media name from domain
+            media_english = get_english_media_name(link)
             
             articles.append({
                 'title': title,
@@ -121,12 +119,15 @@ def search_news(keyword):
 
 def translate_journalist(name):
     """Translate journalist name to English"""
+    if name == "N/A" or not name:
+        return "N/A"
+        
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{
                 "role": "user",
-                "content": f"Translate this Korean name to English using standard romanization: {name}"
+                "content": f"Translate this Korean name to English using standard romanization. Format as 'Firstname Lastname': {name}"
             }]
         )
         return response.choices[0].message['content'].strip()
@@ -147,7 +148,12 @@ def get_analysis(title):
         
         2. English Title: [Professional translation]
         
-        3. Synopsis: Write a detailed 2-3 paragraph summary (4-6 sentences total) covering all key points
+        3. Synopsis: Write a very detailed 3-4 paragraph summary (6-8 sentences total) that covers:
+           - Main announcement or event
+           - Key details and context
+           - Implications or impact
+           - Relevant stakeholder reactions or next steps
+           Make it comprehensive and informative for executives.
         
         Korean Title: {title}
         
@@ -166,8 +172,56 @@ def get_analysis(title):
         st.error(f"OpenAI Error: {str(e)}")
         return "Error in analysis"
 
+def validate_results(df):
+    """Validate and clean results"""
+    try:
+        # Check categories
+        valid_categories = ['CIP', 'Govt policy', 'Local govt policy', 'Stakeholders', 'RE Industry']
+        invalid_cats = df[~df['Category'].isin(valid_categories)]['Category'].unique()
+        if len(invalid_cats) > 0:
+            st.warning(f"Found invalid categories: {invalid_cats}")
+        
+        # Check dates
+        df['Date'] = pd.to_datetime(df['Date'])
+        future_dates = df[df['Date'] > datetime.now()]['Date'].unique()
+        if len(future_dates) > 0:
+            st.warning(f"Found future dates: {future_dates}")
+        
+        # Check synopsis length
+        short_synopsis = df[df['Synopsis'].str.len() < 200]
+        if len(short_synopsis) > 0:
+            st.warning(f"Found {len(short_synopsis)} articles with short synopsis")
+        
+        # Check for missing translations
+        missing_trans = df[df['English Title'].isnull() | (df['English Title'] == '')]
+        if len(missing_trans) > 0:
+            st.warning(f"Found {len(missing_trans)} articles with missing translations")
+        
+        # Check for duplicate articles
+        duplicates = df[df.duplicated(subset=['Korean Title'], keep=False)]
+        if len(duplicates) > 0:
+            st.warning(f"Found {len(duplicates)} duplicate articles")
+        
+        return df
+    except Exception as e:
+        st.error(f"Error in validation: {str(e)}")
+        return df
+
 def main():
     st.title("🌊 CIP Korea News Monitor")
+    
+    # Date selection
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input(
+            "Start Date",
+            datetime.now() - timedelta(days=7)
+        )
+    with col2:
+        end_date = st.date_input(
+            "End Date",
+            datetime.now()
+        )
     
     # Full keyword list
     default_keywords = [
@@ -201,7 +255,7 @@ def main():
         
         for idx, keyword in enumerate(keywords):
             status.text(f"Searching for: {keyword}")
-            articles = search_news(keyword)
+            articles = search_news(keyword, start_date, end_date)
             
             for article in articles:
                 status.text(f"Analyzing: {article['title'][:50]}...")
@@ -247,6 +301,9 @@ def main():
             
             # Remove duplicates
             df = df.drop_duplicates(subset=['Korean Title'])
+            
+            # Validate results
+            df = validate_results(df)
             
             # Display results
             st.subheader("📊 Results")
