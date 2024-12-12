@@ -225,7 +225,7 @@ def main():
     
     # Full keyword list
     default_keywords = [
-        'CIP', 'COP', '코펜하겐 인프라스트럭쳐 파트너스',
+        'Copenhagen offshore Partners', 'Copenhagen infrastructure Partners', '코펜하겐 인프라스트럭쳐 파트너스',
         '한전', '전기위원회', '울산 부유식', '해울이', '해송',
         '태안해상풍력', '뷔나에너지', '해상풍력', '전남해상풍력',
         '울산해상풍력', '신안해상풍력', '전북해상풍력', '인천해상풍력',
