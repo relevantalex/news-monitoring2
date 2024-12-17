@@ -11,50 +11,6 @@ import time
 
 st.set_page_config(page_title="CIP Korea News Monitor", layout="wide")
 
-# Custom CSS for larger table and professional look
-st.markdown("""
-    <style>
-    .stTable {
-        font-size: 1rem;
-    }
-    .agent-status {
-        background-color: #f8f9fa;
-        border: 1px solid #e9ecef;
-        border-radius: 8px;
-        padding: 20px;
-        margin: 10px 0;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    .agent-header {
-        color: #0068c9;
-        font-weight: bold;
-        font-size: 1.1em;
-        margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    .processing-status {
-        margin-top: 10px;
-        padding: 15px;
-        background-color: #e7f5ff;
-        border-radius: 6px;
-        border-left: 4px solid #0068c9;
-    }
-    .status-details {
-        margin-top: 8px;
-        font-size: 0.9em;
-        color: #495057;
-    }
-    .agent-progress {
-        margin-top: 15px;
-        padding: 10px;
-        background-color: #f1f3f5;
-        border-radius: 4px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 # Initialize database
 init_db()
 
@@ -109,13 +65,13 @@ def get_article_details(url):
                 
         return date
     except requests.exceptions.Timeout:
-        display_agent_status(f"⚠️ Timeout while accessing {url}. Using current date.")
+        st.error(f"⚠️ Timeout while accessing {url}. Using current date.")
         return datetime.now().strftime('%Y-%m-%d')
     except requests.exceptions.RequestException as e:
-        display_agent_status(f"⚠️ Error accessing {url}: {str(e)}")
+        st.error(f"⚠️ Error accessing {url}: {str(e)}")
         return datetime.now().strftime('%Y-%m-%d')
     except Exception as e:
-        display_agent_status(f"⚠️ Unexpected error processing {url}: {str(e)}")
+        st.error(f"⚠️ Unexpected error processing {url}: {str(e)}")
         return datetime.now().strftime('%Y-%m-%d')
 
 def search_news(keyword, target_date):
@@ -197,7 +153,7 @@ def get_analysis(title):
         return result
         
     except Exception as e:
-        display_agent_status(f"⚠️ Error in OpenAI analysis: {str(e)}")
+        st.error(f"⚠️ Error in OpenAI analysis: {str(e)}")
         return {
             "synopsis": "Error in analysis",
             "category": "Unknown",
@@ -246,121 +202,83 @@ def validate_news_relevance(article):
     except:
         return True  # Default to True in case of API error
 
-def display_agent_status(message, details=None, progress=None):
-    """Display AI agent status with professional styling"""
-    with st.container():
-        st.markdown(f"""
-        <div class="agent-status">
-            <div class="agent-header">
-                🤖 AI Agent Status
-            </div>
-            <div class="processing-status">
-                {message}
-                {f'<div class="status-details">{details}</div>' if details else ''}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        if progress is not None:
-            st.progress(progress)
-
 def main():
     st.title("CIP Korea News Monitor")
     
-    # Create two columns for layout
-    main_content, sidebar = st.columns([3, 1])
+    # Sidebar
+    st.sidebar.title("News Management")
     
-    with sidebar:
-        st.sidebar.title("News Management")
-        
-        # Date selection at the top
-        st.sidebar.subheader("📅 Select Date")
-        
-        # Generate dates (newest first)
-        today = datetime.now().date()
-        dates = []
-        current_date = today
-        for _ in range(7):
-            if current_date.weekday() < 5:  # Only weekdays
-                dates.append(current_date)
-            current_date = current_date - timedelta(days=1)
-        dates = sorted(dates, reverse=True)  # Sort dates newest first
-        
-        # Create date selection
-        selected_date = st.sidebar.selectbox(
-            "Choose a date",
-            dates,
-            format_func=lambda x: x.strftime('%Y-%m-%d (%A)'),
-            help="Select a date to view or scrape news"
-        )
-        
-        st.sidebar.markdown("---")
-        
-        # Scrape News button with prominent styling
-        st.sidebar.markdown("""
-        <style>
-        div.stButton > button {
-            width: 100%;
-            background-color: #0068c9;
-            color: white;
-            padding: 10px;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        
-        if st.sidebar.button("🔍 Scrape News"):
-            scrape_news(selected_date)
-        
-        # Add new keyword right under scrape news
-        st.sidebar.markdown("### ➕ Add New Keyword")
-        new_keyword = st.sidebar.text_input("Enter keyword:", placeholder="Type new keyword here...")
-        if st.sidebar.button("Add Keyword"):
-            if new_keyword:
-                save_keyword(new_keyword)
-                st.sidebar.success(f"Added: {new_keyword}")
-        
-        st.sidebar.markdown("---")
-        
-        # Show existing keywords
-        st.sidebar.markdown("### 🔑 Current Keywords")
-        default_keywords = [
-            "CIP", "Climate Investment Partnership", "기후투자동반자",
-            "그린수소", "재생에너지", "탄소중립", "에너지전환"
-        ]
-        all_keywords = default_keywords + get_keywords()
-        for keyword in all_keywords:
-            st.sidebar.markdown(f"• {keyword}")
+    # Date selection at the top of sidebar
+    st.sidebar.subheader("📅 Select Date")
+    
+    # Generate dates (newest first)
+    today = datetime.now().date()
+    dates = []
+    current_date = today
+    for _ in range(7):
+        if current_date.weekday() < 5:  # Only weekdays
+            dates.append(current_date)
+        current_date = current_date - timedelta(days=1)
+    dates = sorted(dates, reverse=True)  # Sort dates newest first
+    
+    # Create date selection
+    selected_date = st.sidebar.selectbox(
+        "Choose a date",
+        dates,
+        format_func=lambda x: x.strftime('%Y-%m-%d (%A)')
+    )
+    
+    st.sidebar.markdown("---")
+    
+    # Scrape News button
+    if st.sidebar.button("🔍 Scrape News"):
+        scrape_news(selected_date)
+    
+    # Add new keyword right under scrape news
+    new_keyword = st.sidebar.text_input("Add new keyword", placeholder="Type new keyword here...")
+    if st.sidebar.button("Add Keyword"):
+        if new_keyword:
+            save_keyword(new_keyword)
+            st.sidebar.success(f"Added: {new_keyword}")
+    
+    st.sidebar.markdown("---")
+    
+    # Show existing keywords
+    st.sidebar.subheader("Current Keywords")
+    default_keywords = [
+        "CIP", "Climate Investment Partnership", "기후투자동반자",
+        "그린수소", "재생에너지", "탄소중립", "에너지전환",
+        "해상풍력", "풍력발전", "신재생에너지", "재생에너지",
+        "해상풍력단지", "부유식", "고정식", "풍력",
+        "Copenhagen Infrastructure Partners", "Copenhagen Offshore Partners",
+        "코펜하겐 인프라스트럭처", "코펜하겐 오프쇼어"
+    ]
+    all_keywords = default_keywords + get_keywords()
+    for keyword in all_keywords:
+        st.sidebar.markdown(f"• {keyword}")
     
     # Main content area
-    with main_content:
-        # Display news in main area
-        display_news(selected_date)
+    display_news(selected_date)
 
 def scrape_news(date):
     default_keywords = [
         "CIP", "Climate Investment Partnership", "기후투자동반자",
-        "그린수소", "재생에너지", "탄소중립", "에너지전환"
+        "그린수소", "재생에너지", "탄소중립", "에너지전환",
+        "해상풍력", "풍력발전", "신재생에너지", "재생에너지",
+        "해상풍력단지", "부유식", "고정식", "풍력",
+        "Copenhagen Infrastructure Partners", "Copenhagen Offshore Partners",
+        "코펜하겐 인프라스트럭처", "코펜하겐 오프쇼어"
     ]
     all_keywords = default_keywords + get_keywords()
     
-    # Initialize the scraping process with professional status display
-    display_agent_status(
-        "🚀 Initializing News Search",
-        "Preparing to search Korean news sources for relevant articles...",
-        0.0
-    )
-    
+    # Initialize progress
+    progress_text = st.empty()
     progress_bar = st.progress(0)
-    total_steps = len(all_keywords)
     
-    all_articles = []
     for idx, keyword in enumerate(all_keywords):
-        progress = idx / total_steps
-        
-        display_agent_status(
-            f"🔍 Searching: {keyword}",
-            f"Processing {idx + 1} of {total_steps} keywords | Analyzing relevance and content",
-            progress
-        )
+        progress = idx / len(all_keywords)
+        progress_text.text(f"Searching: {keyword}")
+        progress_bar.progress(progress)
         
         articles = search_news(keyword, date.strftime('%Y-%m-%d'))
         
@@ -368,29 +286,21 @@ def scrape_news(date):
             if not is_korean_news(article['url'], article['title']):
                 continue
             
-            display_agent_status(
-                "🤖 Processing Article",
-                f"Analyzing: {article['title'][:50]}...",
-                progress
-            )
-            
+            progress_text.text(f"Analyzing: {article['title'][:50]}...")
             analysis = get_analysis(article['title'])
             article.update(analysis)
             
             if validate_news_relevance(article):
                 save_article(article)
-        
-        progress_bar.progress((idx + 1) / total_steps)
     
-    display_agent_status(
-        "✅ News Scraping Completed",
-        f"Successfully processed {total_steps} keywords and filtered for relevant South Korean news",
-        1.0
-    )
+    progress_bar.progress(1.0)
+    progress_text.text("News scraping completed! ✅")
 
 def display_news(date):
     articles = get_articles_by_date(date.strftime('%Y-%m-%d'))
-    if articles:
+    
+    # Convert to DataFrame only if we have articles
+    if isinstance(articles, list) and len(articles) > 0:
         df = pd.DataFrame(articles)
         df = df[['title', 'media_name', 'synopsis', 'category', 'stakeholder', 'url']]
         df.columns = ['Title', 'Media', 'Synopsis', 'Category', 'Stakeholder', 'URL']
