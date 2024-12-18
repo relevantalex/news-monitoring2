@@ -341,14 +341,21 @@ def display_news(date):
             def make_clickable(url):
                 return f'<a href="{url}" target="_blank">🔗 Link</a>'
             
-            # Select and rename columns
-            display_df = articles_df[['title', 'english_title', 'media_name', 'synopsis', 'date', 'category', 'stakeholder', 'url']]
+            # Ensure all required columns exist
+            if 'english_title' not in articles_df.columns:
+                articles_df['english_title'] = ''
+            
+            # Select available columns
+            columns = ['title', 'english_title', 'media_name', 'synopsis', 'date', 'category', 'stakeholder', 'url']
+            display_df = articles_df[columns]
+            
+            # Rename columns
             display_df.columns = ['📝 Korean Title', '🌐 English Title', '📰 Media', '📋 Synopsis', '📅 Date', '🏷️ Category', '👥 Stakeholders', '🔗 Link']
             
             # Convert URLs to clickable links
             display_df['🔗 Link'] = display_df['🔗 Link'].apply(make_clickable)
             
-            # Display table with increased height and HTML rendering
+            # Display table with HTML rendering
             st.write(display_df.to_html(escape=False, index=False), unsafe_allow_html=True)
             
             # Add export option
