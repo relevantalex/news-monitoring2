@@ -114,52 +114,54 @@ def search_news(keyword, target_date):
         return []
 
 def get_analysis(title):
-    """Get detailed OpenAI analysis"""
-    prompt = f"""Analyze this Korean news title and provide the following information in JSON format:
-    1. A detailed synopsis in English (2-3 sentences)
-    2. Category (CIP if related to MOU, contracts, or new projects; otherwise categorize as Government, Industry, or Technology)
-    3. Main stakeholder mentioned
-    
-    Title: {title}
-    
-    Respond EXACTLY in this format:
-    {{"synopsis": "detailed synopsis here", "category": "category here", "stakeholder": "main stakeholder here"}}"""
-    
+    """Get detailed OpenAI analysis of the article"""
     try:
         response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": """You are a professional news analyst specializing in Korean energy industry news.
+                Provide detailed analysis in the following format:
+                1. English Title: Direct but natural English translation
+                2. Synopsis: Detailed 4-5 sentence summary organized in 1-2 paragraphs. Focus on key points, implications, and context
+                3. Category: Classify into EXACTLY ONE of: CIP, Govt Policy, Local Govt Policy, Stakeholders, RE Industry
+                4. Stakeholders: List main organizations/entities mentioned (comma-separated)"""},
+                {"role": "user", "content": f"Analyze this Korean news title: {title}"}
+            ],
+            temperature=0.5
         )
         
-        # Get the response text
-        response_text = response.choices[0].message.content.strip()
+        analysis = response.choices[0].message.content
         
-        # Handle potential formatting issues
-        try:
-            # Try direct eval first
-            result = eval(response_text)
-        except:
-            # If eval fails, try to clean up the response
-            # Remove any markdown formatting
-            response_text = response_text.replace('```json', '').replace('```', '').strip()
-            # Ensure proper JSON format
-            response_text = response_text.replace('\n', '').replace('  ', ' ')
-            result = eval(response_text)
+        # Parse the response
+        english_title = ""
+        synopsis = ""
+        category = ""
+        stakeholder = ""
         
-        # Validate required fields
-        required_fields = ['synopsis', 'category', 'stakeholder']
-        if not all(field in result for field in required_fields):
-            raise ValueError("Missing required fields in response")
-            
-        return result
+        sections = analysis.split('\n')
+        for section in sections:
+            if section.startswith("1. English Title:"):
+                english_title = section.replace("1. English Title:", "").strip()
+            elif section.startswith("2. Synopsis:"):
+                synopsis = section.replace("2. Synopsis:", "").strip()
+            elif section.startswith("3. Category:"):
+                category = section.replace("3. Category:", "").strip()
+            elif section.startswith("4. Stakeholders:"):
+                stakeholder = section.replace("4. Stakeholders:", "").strip()
         
-    except Exception as e:
-        st.error(f"⚠️ Error in OpenAI analysis: {str(e)}")
         return {
-            "synopsis": "Error in analysis",
-            "category": "Unknown",
-            "stakeholder": "Unknown"
+            'english_title': english_title,
+            'synopsis': synopsis,
+            'category': category,
+            'stakeholder': stakeholder
+        }
+    except Exception as e:
+        st.error(f"Error in analysis: {str(e)}")
+        return {
+            'english_title': 'Analysis Failed',
+            'synopsis': 'Error during analysis',
+            'category': 'Unknown',
+            'stakeholder': 'Unknown'
         }
 
 def is_korean_news(url, title):
@@ -317,35 +319,50 @@ def display_news(date):
     articles_df = get_articles_by_date(date.strftime('%Y-%m-%d'))
     
     if not articles_df.empty:
-        # Add analysis explanation
-        st.info("""
-        🤖 **AI Analysis Details**
-        Each article has been analyzed for:
-        - 📝 Title: Original article title in Korean
-        - 📰 Media: Source media outlet
-        - 📋 Synopsis: AI-generated English summary
-        - 🏷️ Category: News category (e.g., Industry News, Policy Update)
-        - 👥 Stakeholder: Key organizations or entities mentioned
-        - 🔗 URL: Direct link to the original article
-        """)
+        # Filter to ensure only articles from the correct date
+        articles_df = articles_df[articles_df['date'] == date.strftime('%Y-%m-%d')]
         
-        # Select and rename columns
-        display_df = articles_df[['title', 'media_name', 'synopsis', 'category', 'stakeholder', 'url']]
-        display_df.columns = ['📝 Title', '📰 Media', '📋 Synopsis', '🏷️ Category', '👥 Stakeholder', '🔗 URL']
-        
-        # Display table with increased height
-        st.dataframe(display_df, height=600)
-        
-        # Add export option
-        if st.button("📥 Export Results to CSV"):
-            csv = display_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Download CSV",
-                csv,
-                f"news_analysis_{date.strftime('%Y-%m-%d')}.csv",
-                "text/csv",
-                key='download-csv'
-            )
+        if not articles_df.empty:
+            # Add analysis explanation
+            st.info("""
+            🤖 **AI Analysis Details**
+            Each article has been analyzed with the following information:
+            - 📝 Korean Title: Original article title
+            - 🌐 English Title: AI-translated title
+            - 📰 Media: Source media outlet
+            - 📋 Synopsis: Detailed 4-5 sentence summary in English
+            - 📅 Date: Publication date
+            - 🏷️ Category: One of: CIP, Govt Policy, Local Govt Policy, Stakeholders, RE Industry
+            - 👥 Stakeholders: Key organizations or entities mentioned
+            - 🔗 Link: Direct link to the original article
+            """)
+            
+            # Make URLs clickable
+            def make_clickable(url):
+                return f'<a href="{url}" target="_blank">🔗 Link</a>'
+            
+            # Select and rename columns
+            display_df = articles_df[['title', 'english_title', 'media_name', 'synopsis', 'date', 'category', 'stakeholder', 'url']]
+            display_df.columns = ['📝 Korean Title', '🌐 English Title', '📰 Media', '📋 Synopsis', '📅 Date', '🏷️ Category', '👥 Stakeholders', '🔗 Link']
+            
+            # Convert URLs to clickable links
+            display_df['🔗 Link'] = display_df['🔗 Link'].apply(make_clickable)
+            
+            # Display table with increased height and HTML rendering
+            st.write(display_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+            
+            # Add export option
+            if st.button("📥 Export Results to CSV"):
+                csv = display_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "📥 Download CSV",
+                    csv,
+                    f"news_analysis_{date.strftime('%Y-%m-%d')}.csv",
+                    "text/csv",
+                    key='download-csv'
+                )
+        else:
+            st.info("📭 No news articles found for this date. Click 'Scrape News' to fetch articles.")
     else:
         st.info("📭 No news articles found for this date. Click 'Scrape News' to fetch articles.")
 

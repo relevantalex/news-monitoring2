@@ -11,6 +11,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS news_articles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
+            english_title TEXT,
             url TEXT UNIQUE NOT NULL,
             media_name TEXT,
             date TEXT,
@@ -39,10 +40,11 @@ def save_article(article_data):
     try:
         c.execute('''
             INSERT OR IGNORE INTO news_articles 
-            (title, url, media_name, date, synopsis, category, stakeholder)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (title, english_title, url, media_name, date, synopsis, category, stakeholder)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             article_data['title'],
+            article_data.get('english_title', ''),
             article_data['url'],
             article_data['media_name'],
             article_data['date'],
