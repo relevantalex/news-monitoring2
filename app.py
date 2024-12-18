@@ -181,54 +181,35 @@ def is_korean_news(url, title):
         return True  # Default to True in case of API error
 
 def validate_news_relevance(article):
-    """Validate if the news is relevant to CIP/COP operations"""
-    try:
-        prompt = f"""Given the following context about CIP/COP operations:
-        "Copenhagen Infrastructure Partners (CIP) and Copenhagen Offshore Partners (COP) are key players in South Korea's renewable energy sector, focusing on offshore wind projects to support the country's ambitious goals for energy independence and carbon neutrality."
-        
-        Is this news article relevant to their operations? Consider the following article details:
-        Title: {article['title']}
-        Synopsis: {article['synopsis']}
-        Category: {article['category']}
-        
-        Answer with just 'yes' or 'no'."""
-        
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-        )
-        return response.choices[0].message.content.strip().lower() == 'yes'
-    except:
-        return True  # Default to True in case of API error
+    """Simplified relevance check to avoid over-filtering"""
+    # Basic checks for empty or invalid content
+    if not article.get('title') or not article.get('url'):
+        return False
+    
+    # Accept most articles that made it through the keyword search
+    return True
 
-def display_agent_status(phase, message, substatus=None, progress=None):
-    """Display professional AI agent status"""
-    # Create a container for the agent status
-    with st.container():
-        col1, col2 = st.columns([1, 3])
+def display_agent_status(status_container, stats_container, phase, message, details=None):
+    """Display professional AI agent status in a single organized container"""
+    with status_container:
+        st.empty()  # Clear previous status
         
+        # Status header with phase indicator
+        col1, col2 = st.columns([1, 4])
         with col1:
             if phase == "initialize":
-                st.info("🤖 AI Agent Active")
+                st.info("🤖 Initializing")
             elif phase == "search":
-                st.info("🔍 Search Phase")
+                st.info("🔍 Searching")
             elif phase == "analyze":
-                st.info("🧠 Analysis Phase")
+                st.info("🧠 Analyzing")
             elif phase == "complete":
-                st.success("✅ Task Complete")
+                st.success("✅ Complete")
         
         with col2:
-            # Main status message
             st.write(message)
-            
-            # Sub-status if provided
-            if substatus:
-                st.caption(substatus)
-            
-            # Progress bar if provided
-            if progress is not None:
-                st.progress(progress)
+            if details:
+                st.caption(details)
 
 def scrape_news(date):
     default_keywords = [
@@ -242,107 +223,128 @@ def scrape_news(date):
     all_keywords = default_keywords + get_keywords()
     total_keywords = len(all_keywords)
     
-    # Create containers for persistent status display
+    # Create persistent containers
+    metrics_container = st.container()
     status_container = st.container()
-    progress_container = st.container()
-    stats_container = st.container()
+    details_container = st.container()
     
-    with status_container:
-        # Initialize AI Agent
+    # Initialize metrics
+    processed_articles = 0
+    relevant_articles = 0
+    sources_checked = set()
+    
+    with metrics_container:
+        st.markdown("### 📊 Real-time Analysis Metrics")
+        metric_cols = st.columns(4)
+        
+        # Initialize metric placeholders
+        keywords_metric = metric_cols[0].empty()
+        articles_metric = metric_cols[1].empty()
+        relevant_metric = metric_cols[2].empty()
+        sources_metric = metric_cols[3].empty()
+    
+    # Initialize AI Agent
+    display_agent_status(
+        status_container, 
+        details_container,
+        "initialize",
+        "🚀 AI News Analysis Agent Activated",
+        "Preparing to analyze Korean news sources..."
+    )
+    
+    # Process keywords
+    for idx, keyword in enumerate(all_keywords):
+        progress = (idx + 1) / total_keywords
+        
+        # Update search status
         display_agent_status(
-            "initialize",
-            "🚀 Initializing AI News Analysis Agent",
-            "Preparing to search Korean news sources for relevant articles..."
+            status_container,
+            details_container,
+            "search",
+            f"📡 Searching for articles related to: {keyword}",
+            f"Processing keyword {idx + 1} of {total_keywords}"
         )
         
-        # Stats tracking
-        processed_articles = 0
-        relevant_articles = 0
+        articles = search_news(keyword, date.strftime('%Y-%m-%d'))
         
-        # Main processing loop
-        for idx, keyword in enumerate(all_keywords):
-            progress = idx / total_keywords
+        for article in articles:
+            processed_articles += 1
+            sources_checked.add(article.get('media_name', 'Unknown'))
             
-            # Update search status
+            # Update analysis status
             display_agent_status(
-                "search",
-                f"📡 Searching for: {keyword}",
-                f"Processing keyword {idx + 1} of {total_keywords}",
-                progress
+                status_container,
+                details_container,
+                "analyze",
+                f"🔬 Analyzing Article",
+                f"Source: {article.get('media_name', 'Unknown')} | Title: {article['title'][:50]}..."
             )
             
-            articles = search_news(keyword, date.strftime('%Y-%m-%d'))
+            # Get OpenAI analysis
+            analysis = get_analysis(article['title'])
+            article.update(analysis)
             
-            for article in articles:
-                processed_articles += 1
-                
-                if not is_korean_news(article['url'], article['title']):
-                    continue
-                
-                # Update analysis status
-                display_agent_status(
-                    "analyze",
-                    f"🔬 Analyzing Article Content",
-                    f"Title: {article['title'][:50]}...",
-                    progress
-                )
-                
-                analysis = get_analysis(article['title'])
-                article.update(analysis)
-                
-                if validate_news_relevance(article):
-                    relevant_articles += 1
-                    save_article(article)
-                
-                # Update stats
-                with stats_container:
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Keywords Processed", f"{idx + 1}/{total_keywords}")
-                    with col2:
-                        st.metric("Articles Analyzed", processed_articles)
-                    with col3:
-                        st.metric("Relevant Articles", relevant_articles)
+            if validate_news_relevance(article):
+                relevant_articles += 1
+                save_article(article)
+            
+            # Update metrics
+            keywords_metric.metric("🎯 Keywords", f"{idx + 1}/{total_keywords}")
+            articles_metric.metric("📰 Articles Found", processed_articles)
+            relevant_metric.metric("✨ Relevant Articles", relevant_articles)
+            sources_metric.metric("🗞️ Sources Checked", len(sources_checked))
     
     # Final status update
     display_agent_status(
+        status_container,
+        details_container,
         "complete",
         "✨ News Analysis Complete",
         f"""
         Final Statistics:
         • Keywords Processed: {total_keywords}
         • Articles Analyzed: {processed_articles}
-        • Relevant Articles Found: {relevant_articles}
-        """,
-        1.0
+        • Relevant Articles: {relevant_articles}
+        • News Sources: {len(sources_checked)}
+        """
     )
-    
-    st.success("🎉 AI Agent has successfully completed the news analysis task!")
 
 def display_news(date):
     st.subheader(f"📊 News Analysis Results - {date.strftime('%Y-%m-%d (%A)')}")
     
     articles = get_articles_by_date(date.strftime('%Y-%m-%d'))
     
-    # Convert to DataFrame only if we have articles
     if isinstance(articles, list) and len(articles) > 0:
+        # Add analysis explanation
+        st.info("""
+        🤖 **AI Analysis Details**
+        Each article has been analyzed for:
+        - 📝 Title: Original article title in Korean
+        - 📰 Media: Source media outlet
+        - 📋 Synopsis: AI-generated English summary
+        - 🏷️ Category: News category (e.g., Industry News, Policy Update)
+        - 👥 Stakeholder: Key organizations or entities mentioned
+        - 🔗 URL: Direct link to the original article
+        """)
+        
+        # Convert to DataFrame
         df = pd.DataFrame(articles)
         df = df[['title', 'media_name', 'synopsis', 'category', 'stakeholder', 'url']]
         df.columns = ['📝 Title', '📰 Media', '📋 Synopsis', '🏷️ Category', '👥 Stakeholder', '🔗 URL']
         
-        # Add a description of the analysis
-        st.info("""
-        🤖 **AI Analysis Details**
-        - 📝 Title: Original article title
-        - 📰 Media: Source media outlet
-        - 📋 Synopsis: AI-generated English summary
-        - 🏷️ Category: AI-classified news category
-        - 👥 Stakeholder: Main entities involved
-        - 🔗 URL: Direct link to article
-        """)
-        
-        # Make table larger
+        # Display table with increased height
         st.dataframe(df, height=600)
+        
+        # Add export option
+        if st.button("📥 Export Results to CSV"):
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download CSV",
+                csv,
+                f"news_analysis_{date.strftime('%Y-%m-%d')}.csv",
+                "text/csv",
+                key='download-csv'
+            )
     else:
         st.info("📭 No news articles found for this date. Click 'Scrape News' to fetch articles.")
 
