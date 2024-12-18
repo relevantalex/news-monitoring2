@@ -8,6 +8,8 @@ import re
 from urllib.parse import urlparse
 from database import init_db, save_article, get_articles_by_date, save_keyword, get_keywords
 import time
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="🌊 CIP Korea News Monitor", layout="wide")
 
@@ -312,9 +314,9 @@ def scrape_news(date):
 def display_news(date):
     st.subheader(f"📊 News Analysis Results - {date.strftime('%Y-%m-%d (%A)')}")
     
-    articles = get_articles_by_date(date.strftime('%Y-%m-%d'))
+    articles_df = get_articles_by_date(date.strftime('%Y-%m-%d'))
     
-    if isinstance(articles, list) and len(articles) > 0:
+    if not articles_df.empty:
         # Add analysis explanation
         st.info("""
         🤖 **AI Analysis Details**
@@ -327,17 +329,16 @@ def display_news(date):
         - 🔗 URL: Direct link to the original article
         """)
         
-        # Convert to DataFrame
-        df = pd.DataFrame(articles)
-        df = df[['title', 'media_name', 'synopsis', 'category', 'stakeholder', 'url']]
-        df.columns = ['📝 Title', '📰 Media', '📋 Synopsis', '🏷️ Category', '👥 Stakeholder', '🔗 URL']
+        # Select and rename columns
+        display_df = articles_df[['title', 'media_name', 'synopsis', 'category', 'stakeholder', 'url']]
+        display_df.columns = ['📝 Title', '📰 Media', '📋 Synopsis', '🏷️ Category', '👥 Stakeholder', '🔗 URL']
         
         # Display table with increased height
-        st.dataframe(df, height=600)
+        st.dataframe(display_df, height=600)
         
         # Add export option
         if st.button("📥 Export Results to CSV"):
-            csv = df.to_csv(index=False).encode('utf-8')
+            csv = display_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 "📥 Download CSV",
                 csv,
