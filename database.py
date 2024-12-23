@@ -1,115 +1,175 @@
+"""Database management module."""
+
 import sqlite3
-from datetime import datetime
-import pandas as pd
+from typing import Dict, List
 
-def init_db():
-    conn = sqlite3.connect('news_monitor.db')
-    c = conn.cursor()
-    
-    # Create table for news articles
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS news_articles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            english_title TEXT,
-            url TEXT UNIQUE NOT NULL,
-            media_name TEXT,
-            date TEXT,
-            synopsis TEXT,
-            category TEXT,
-            stakeholder TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Create table for custom keywords
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS keywords (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            keyword TEXT UNIQUE NOT NULL
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
 
-def save_article(article_data):
-    conn = sqlite3.connect('news_monitor.db')
-    c = conn.cursor()
-    
-    try:
-        c.execute('''
-            INSERT OR IGNORE INTO news_articles 
-            (title, english_title, url, media_name, date, synopsis, category, stakeholder)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            article_data['title'],
-            article_data.get('english_title', ''),
-            article_data['url'],
-            article_data['media_name'],
-            article_data['date'],
-            article_data['synopsis'],
-            article_data['category'],
-            article_data['stakeholder']
-        ))
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"Error saving article: {e}")
-        return False
-    finally:
-        conn.close()
+class d:
+    """Database operations handler."""
 
-def get_articles_by_date(date):
-    conn = sqlite3.connect('news_monitor.db')
-    df = pd.read_sql_query(
-        'SELECT * FROM news_articles WHERE date = ? ORDER BY created_at DESC',
-        conn,
-        params=(date,)
-    )
-    conn.close()
-    return df
+    def __init__(self, db_name: str):
+        """Init db connection."""
+        self.db_name = db_name
+        self._init_db()
 
-def save_keyword(keyword):
-    conn = sqlite3.connect('news_monitor.db')
-    c = conn.cursor()
-    try:
-        c.execute('INSERT OR IGNORE INTO keywords (keyword) VALUES (?)', (keyword,))
-        conn.commit()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
+    def _init_db(self) -> None:
+        """Init db tables."""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS articles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    url TEXT UNIQUE NOT NULL,
+                    cat TEXT,
+                    src TEXT,
+                    pub_date DATE,
+                    created TIMESTAMP
+                    DEFAULT CURRENT_TIMESTAMP
+                )
+            """
+            )
+            conn.commit()
 
-def get_keywords():
-    conn = sqlite3.connect('news_monitor.db')
-    c = conn.cursor()
-    c.execute('SELECT keyword FROM keywords')
-    keywords = [row[0] for row in c.fetchall()]
-    conn.close()
-    return keywords
+    def add_article(
+        self,
+        title: str,
+        url: str,
+        cat: str,
+        src: str = None,
+        pub_date: str = None,
+    ) -> int:
+        """Add article to db."""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            query = (
+                "INSERT INTO articles "
+                "(title, url, cat, src, pub_date) "
+                "VALUES (?, ?, ?, ?, ?)"
+            )
+            params = [title, url, cat, src, pub_date]
+            cursor.execute(query, params)
+            return cursor.lastrowid
 
-def remove_keyword(keyword):
-    conn = sqlite3.connect('news_monitor.db')
-    c = conn.cursor()
-    try:
-        c.execute('DELETE FROM keywords WHERE keyword = ?', (keyword,))
-        conn.commit()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
+    def get_articles(
+        self,
+        start: str = None,
+        end: str = None,
+    ) -> List[Dict]:
+        """Get articles."""
+        query = "SELECT * FROM articles"
+        params = []
 
-def get_scraped_dates():
-    conn = sqlite3.connect('news_monitor.db')
-    c = conn.cursor()
-    try:
-        c.execute('SELECT DISTINCT date FROM news_articles ORDER BY date DESC')
-        dates = [row[0] for row in c.fetchall()]
-        return dates
-    except:
-        return []
-    finally:
-        conn.close()
+        if start or end:
+            query += " WHERE"
+            if start:
+                query += " pub_date >= ?"
+                params.append(start)
+            if end:
+                query += " AND" if start else ""
+                query += " pub_date <= ?"
+                params.append(end)
+
+        with sqlite3.connect(self.db_name) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def search_articles(
+        self,
+        query: str = "",
+        start: str = None,
+        end: str = None,
+        cat: str = None,
+    ) -> List[Dict]:
+        """Search articles."""
+        sql = "SELECT * FROM articles WHERE 1=1"
+        params = []
+
+        if query:
+            sql += " AND (title LIKE ? " "OR src LIKE ?)"
+            params.extend([f"%{query}%", f"%{query}%"])
+
+        if start:
+            sql += " AND pub_date >= ?"
+            params.append(start)
+
+        if end:
+            sql += " AND pub_date <= ?"
+            params.append(end)
+
+        if cat:
+            sql += " AND cat = ?"
+            params.append(cat)
+
+        with sqlite3.connect(self.db_name) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_article(
+        self,
+        aid: int,
+        data: Dict,
+    ) -> bool:
+        """Update article."""
+        fields = ["title", "url", "cat", "src", "pub_date"]
+        updates = [f"{k} = ?" for k in data.keys() if k in fields]
+
+        if not updates:
+            return False
+
+        query = f"UPDATE articles SET " f"{', '.join(updates)} " f"WHERE id = ?"
+        params = [data[k] for k in data.keys() if k in fields]
+        params.append(aid)
+
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return cursor.rowcount > 0
+
+    def delete_article(
+        self,
+        aid: int,
+    ) -> bool:
+        """Delete article."""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM articles " "WHERE id = ?", (aid,))
+            return cursor.rowcount > 0
+
+    def get_article_stats(self, s: str = None, e: str = None) -> Dict:
+        """Stats."""
+        q = [
+            "sELECt cOuNt(*)",
+            "n,cOuNt(DiStInCt",
+            "cAt)c,cOuNt(DiStInCt",
+            "sRc)s",
+            "mIn(pUb_dAtE)",
+            "d1,mAx(pUb_dAtE)",
+            "d2 fRoM aRtIcLeS",
+            "wHeRe 1=1",
+        ]
+        p = []
+        if s:
+            q += ["aNd pUb_dAtE>=?"]
+            p += [s]
+        if e:
+            q += ["aNd pUb_dAtE<=?"]
+            p += [e]
+        with sqlite3.connect(self.db_name) as c:
+            x = c.cursor()
+            x.execute("".join(q), p)
+            return dict(x.fetchone())
+
+    def get_categories(
+        self,
+    ) -> List[str]:
+        """Get categories."""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT cat " "FROM articles")
+            return [row[0] for row in cursor.fetchall() if row[0]]
