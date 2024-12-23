@@ -9,7 +9,6 @@ import streamlit as st
 from database import DatabaseManager
 from verify_scraper import NewsVerifier
 from verify_scraper_playwright import NewsVerifierPlaywright
-from verify_scraper_selenium import NewsScraperSelenium
 
 # Initialize database
 db = DatabaseManager("news_monitoring.db")
@@ -48,12 +47,11 @@ elif page == "Verify Articles":
     if st.button("Verify Articles"):
         with st.spinner("Verifying articles..."):
             verifier = NewsVerifierPlaywright()
-            selenium_verifier = NewsScraperSelenium()
             basic_verifier = NewsVerifier()
 
             # Run all verifiers
             articles = []
-            for v in [verifier, selenium_verifier, basic_verifier]:
+            for v in [verifier, basic_verifier]:
                 try:
                     articles.extend(v.verify_coverage(date.strftime("%Y-%m-%d")))
                 except Exception as e:
@@ -120,10 +118,7 @@ elif page == "Export":
         if format_type == "CSV":
             df = pd.DataFrame(articles)
             st.download_button(
-                "Download CSV",
-                df.to_csv(index=False),
-                "news_articles.csv",
-                "text/csv",
+                "Download CSV", df.to_csv(index=False), "news_articles.csv", "text/csv"
             )
         else:
             st.download_button(
