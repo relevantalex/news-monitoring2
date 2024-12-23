@@ -14,23 +14,26 @@ class DatabaseManager:
 
     def _init_db(self) -> None:
         """Init db tables."""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS articles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        url TEXT UNIQUE NOT NULL,
+                        cat TEXT,
+                        src TEXT,
+                        pub_date DATE,
+                        created TIMESTAMP
+                        DEFAULT CURRENT_TIMESTAMP
+                    )
                 """
-                CREATE TABLE IF NOT EXISTS articles (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    url TEXT UNIQUE NOT NULL,
-                    cat TEXT,
-                    src TEXT,
-                    pub_date DATE,
-                    created TIMESTAMP
-                    DEFAULT CURRENT_TIMESTAMP
                 )
-            """
-            )
-            conn.commit()
+                conn.commit()
+        except sqlite3.Error as e:
+            print(f"Error initializing database: {e}")
 
     def add_article(
         self,
@@ -41,16 +44,21 @@ class DatabaseManager:
         pub_date: str = None,
     ) -> int:
         """Add article to db."""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            query = (
-                "INSERT INTO articles "
-                "(title, url, cat, src, pub_date) "
-                "VALUES (?, ?, ?, ?, ?)"
-            )
-            params = [title, url, cat, src, pub_date]
-            cursor.execute(query, params)
-            return cursor.lastrowid
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                query = (
+                    "INSERT INTO articles "
+                    "(title, url, cat, src, pub_date) "
+                    "VALUES (?, ?, ?, ?, ?)"
+                )
+                params = [title, url, cat, src, pub_date]
+                cursor.execute(query, params)
+                conn.commit()
+                return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"Error adding article: {e}")
+            return None
 
     def get_articles(
         self,
@@ -58,24 +66,25 @@ class DatabaseManager:
         end: str = None,
     ) -> List[Dict]:
         """Get articles."""
-        query = "SELECT * FROM articles"
+        query = ["SELECT * FROM articles WHERE 1=1"]
         params = []
+        if start:
+            query.append(" AND pub_date >= ?")
+            params.append(start)
+        if end:
+            query.append(" AND pub_date <= ?")
+            params.append(end)
+        query.append(" ORDER BY pub_date DESC")
 
-        if start or end:
-            query += " WHERE"
-            if start:
-                query += " pub_date >= ?"
-                params.append(start)
-            if end:
-                query += " AND" if start else ""
-                query += " pub_date <= ?"
-                params.append(end)
-
-        with sqlite3.connect(self.db_name) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute("".join(query), params)
+                columns = [col[0] for col in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"Error getting articles: {e}")
+            return []
 
     def search_articles(
         self,
@@ -85,91 +94,107 @@ class DatabaseManager:
         cat: str = None,
     ) -> List[Dict]:
         """Search articles."""
-        sql = "SELECT * FROM articles WHERE 1=1"
+        sql = ["SELECT * FROM articles WHERE 1=1"]
         params = []
 
         if query:
-            sql += " AND (title LIKE ? " "OR src LIKE ?)"
+            sql.append(" AND (title LIKE ? OR content LIKE ?)")
             params.extend([f"%{query}%", f"%{query}%"])
-
         if start:
-            sql += " AND pub_date >= ?"
+            sql.append(" AND pub_date >= ?")
             params.append(start)
-
         if end:
-            sql += " AND pub_date <= ?"
+            sql.append(" AND pub_date <= ?")
             params.append(end)
-
         if cat:
-            sql += " AND cat = ?"
+            sql.append(" AND cat = ?")
             params.append(cat)
 
-        with sqlite3.connect(self.db_name) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(sql, params)
-            return [dict(row) for row in cursor.fetchall()]
+        sql.append(" ORDER BY pub_date DESC")
+
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute("".join(sql), params)
+                columns = [col[0] for col in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"Error searching articles: {e}")
+            return []
 
     def update_article(
         self,
         aid: int,
         data: Dict,
-    ) -> bool:
+    ) -> None:
         """Update article."""
-        fields = ["title", "url", "cat", "src", "pub_date"]
-        updates = [f"{k} = ?" for k in data.keys() if k in fields]
-
+        valid_fields = {"title", "url", "cat", "src", "pub_date"}
+        updates = {k: v for k, v in data.items() if k in valid_fields}
         if not updates:
-            return False
+            return
 
-        query = f"UPDATE articles SET " f"{', '.join(updates)} " f"WHERE id = ?"
-        params = [data[k] for k in data.keys() if k in fields]
-        params.append(aid)
+        query = "UPDATE articles SET "
+        query += ", ".join(f"{k}=?" for k in updates.keys())
+        query += " WHERE id=?"
 
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return cursor.rowcount > 0
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, list(updates.values()) + [aid])
+                conn.commit()
+        except sqlite3.Error as e:
+            print(f"Error updating article: {e}")
 
     def delete_article(
         self,
         aid: int,
-    ) -> bool:
+    ) -> None:
         """Delete article."""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM articles " "WHERE id = ?", (aid,))
-            return cursor.rowcount > 0
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM articles WHERE id=?", [aid])
+                conn.commit()
+        except sqlite3.Error as e:
+            print(f"Error deleting article: {e}")
 
-    def get_article_stats(self, s: str = None, e: str = None) -> Dict:
-        """Stats."""
-        q = [
-            "sELECt cOuNt(*)",
-            "n,cOuNt(DiStInCt",
-            "cAt)c,cOuNt(DiStInCt",
-            "sRc)s",
-            "mIn(pUb_dAtE)",
-            "d1,mAx(pUb_dAtE)",
-            "d2 fRoM aRtIcLeS",
-            "wHeRe 1=1",
+    def get_article_stats(self, start: str = None, end: str = None) -> Dict:
+        """Get article statistics."""
+        query = [
+            """
+            SELECT COUNT(*) as n,
+                   COUNT(DISTINCT cat) as c,
+                   COUNT(DISTINCT src) as s,
+                   MIN(pub_date) as d1,
+                   MAX(pub_date) as d2
+            FROM articles
+            WHERE 1=1
+            """
         ]
-        p = []
-        if s:
-            q += ["aNd pUb_dAtE>=?"]
-            p += [s]
-        if e:
-            q += ["aNd pUb_dAtE<=?"]
-            p += [e]
-        with sqlite3.connect(self.db_name) as c:
-            x = c.cursor()
-            x.execute("".join(q), p)
-            return dict(x.fetchone())
+        params = []
+        if start:
+            query.append(" AND pub_date >= ?")
+            params.append(start)
+        if end:
+            query.append(" AND pub_date <= ?")
+            params.append(end)
 
-    def get_categories(
-        self,
-    ) -> List[str]:
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute("".join(query), params)
+                return dict(zip(["n", "c", "s", "d1", "d2"], cursor.fetchone()))
+        except sqlite3.Error as e:
+            print(f"Error getting article stats: {e}")
+            return {}
+
+    def get_categories(self) -> List[str]:
         """Get categories."""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT cat " "FROM articles")
-            return [row[0] for row in cursor.fetchall() if row[0]]
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT DISTINCT cat FROM articles")
+                return [row[0] for row in cursor.fetchall() if row[0]]
+        except sqlite3.Error as e:
+            print(f"Error getting categories: {e}")
+            return []
