@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import openai
 import re
 from urllib.parse import urlparse
-from database import init_db, save_article, get_articles_by_date, save_keyword, get_keywords
+from database import init_db, save_article, get_articles_by_date, save_keyword, get_keywords, remove_keyword
 import time
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -376,60 +376,41 @@ def display_news(date):
 def main():
     st.title("🌊 CIP Korea News Monitor")
     
-    # Sidebar
-    st.sidebar.title("📰 News Management")
+    # Date selection
+    target_date = st.sidebar.date_input(
+        "Select Date",
+        datetime.now()
+    ).strftime('%Y-%m-%d')
     
-    # Date selection at the top of sidebar
-    st.sidebar.subheader("📅 Select Date")
-    
-    # Generate dates (newest first)
-    today = datetime.now().date()
-    dates = []
-    current_date = today
-    for _ in range(7):
-        if current_date.weekday() < 5:  # Only weekdays
-            dates.append(current_date)
-        current_date = current_date - timedelta(days=1)
-    dates = sorted(dates, reverse=True)  # Sort dates newest first
-    
-    # Create date selection
-    selected_date = st.sidebar.selectbox(
-        "Choose a date",
-        dates,
-        format_func=lambda x: x.strftime('%Y-%m-%d (%A)')
-    )
-    
-    st.sidebar.markdown("---")
-    
-    # Scrape News button
-    if st.sidebar.button("🔍 Scrape News"):
-        scrape_news(selected_date)
-    
-    # Add new keyword right under scrape news
-    new_keyword = st.sidebar.text_input("✨ Add new keyword", placeholder="Type new keyword here...")
-    if st.sidebar.button("➕ Add Keyword"):
+    # Keyword management
+    st.sidebar.subheader("Keywords")
+    new_keyword = st.sidebar.text_input("Add new keyword:")
+    if st.sidebar.button("Add Keyword"):
         if new_keyword:
-            save_keyword(new_keyword)
-            st.sidebar.success(f"✅ Added: {new_keyword}")
+            if save_keyword(new_keyword):
+                st.sidebar.success(f"Added keyword: {new_keyword}")
+            else:
+                st.sidebar.error("Failed to add keyword")
     
-    st.sidebar.markdown("---")
+    # Display existing keywords with remove buttons
+    keywords = get_keywords()
+    if keywords:
+        st.sidebar.write("Current keywords:")
+        for keyword in keywords:
+            col1, col2 = st.sidebar.columns([3, 1])
+            col1.write(keyword)
+            if col2.button("🗑️", key=f"remove_{keyword}"):
+                if remove_keyword(keyword):
+                    st.rerun()
+                else:
+                    st.sidebar.error(f"Failed to remove {keyword}")
     
-    # Show existing keywords
-    st.sidebar.subheader("🔑 Current Keywords")
-    default_keywords = [
-        "CIP", "Climate Investment Partnership", "기후투자동반자",
-        "그린수소", "재생에너지", "탄소중립", "에너지전환",
-        "해상풍력", "풍력발전", "신재생에너지", "재생에너지",
-        "해상풍력단지", "부유식", "고정식", "풍력",
-        "Copenhagen Infrastructure Partners", "Copenhagen Offshore Partners",
-        "코펜하겐 인프라스트럭처", "코펜하겐 오프쇼어"
-    ]
-    all_keywords = default_keywords + get_keywords()
-    for keyword in all_keywords:
-        st.sidebar.markdown(f"🔸 {keyword}")
+    # Scraping section
+    if st.sidebar.button("Scrape News"):
+        scrape_news(target_date)
     
-    # Main content area
-    display_news(selected_date)
+    # Display section
+    display_news(target_date)
 
 if __name__ == "__main__":
     main()

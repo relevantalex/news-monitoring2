@@ -89,3 +89,15 @@ def get_keywords():
     keywords = [row[0] for row in c.fetchall()]
     conn.close()
     return keywords
+
+def remove_keyword(keyword):
+    conn = sqlite3.connect('news_monitor.db')
+    c = conn.cursor()
+    try:
+        c.execute('DELETE FROM keywords WHERE keyword = ?', (keyword,))
+        conn.commit()
+        return True
+    except:
+        return False
+    finally:
+        conn.close()
