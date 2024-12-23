@@ -416,6 +416,8 @@ def main():
     
     # Show existing keywords
     st.sidebar.subheader("🔑 Current Keywords")
+    
+    # Default keywords - add them to database if not present
     default_keywords = [
         "CIP", "Climate Investment Partnership", "기후투자동반자",
         "그린수소", "재생에너지", "탄소중립", "에너지전환",
@@ -425,18 +427,31 @@ def main():
         "코펜하겐 인프라스트럭처", "코펜하겐 오프쇼어"
     ]
     
-    # Display default keywords
+    # Add default keywords to database if they don't exist
     for keyword in default_keywords:
-        st.sidebar.markdown(f"🔸 {keyword}")
+        save_keyword(keyword)
     
-    # Display custom keywords with remove option
-    custom_keywords = get_keywords()
-    for keyword in custom_keywords:
+    # Display all keywords with remove option
+    all_keywords = get_keywords()
+    for keyword in all_keywords:
         col1, col2 = st.sidebar.columns([4, 1])
         col1.markdown(f"🔸 {keyword}")
         if col2.button("🗑️", key=f"remove_{keyword}", help=f"Remove {keyword}"):
             if remove_keyword(keyword):
                 st.rerun()
+    
+    # Add a button to restore default keywords
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Restore Default Keywords"):
+        for keyword in default_keywords:
+            save_keyword(keyword)
+        st.rerun()
+    
+    # Add a button to remove all keywords
+    if st.sidebar.button("🗑️ Remove All Keywords"):
+        for keyword in all_keywords:
+            remove_keyword(keyword)
+        st.rerun()
     
     # Main content area
     display_news(selected_date)
