@@ -4,7 +4,7 @@ import sqlite3
 from typing import Dict, List
 
 
-class d:
+class DatabaseManager:
     """Database operations handler."""
 
     def __init__(self, db_name: str):
