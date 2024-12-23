@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 from requests import RequestException, get
 
 
-class V:
+class NewsVerifier:
     """News verifier."""
 
     def __init__(self) -> None:
@@ -65,7 +65,7 @@ class V:
 
 
 if __name__ == "__main__":
-    v = V()
+    v = NewsVerifier()
 
     # Verify December 18th articles
     print("\nVerifying December 18th, 2024 articles...")
