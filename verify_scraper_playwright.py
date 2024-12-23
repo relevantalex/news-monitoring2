@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import Page, sync_playwright
 
 
-class NewsVerifier:
+class NewsVerifierPlaywright:
     """News verifier using Playwright."""
 
     def verify_coverage(self, date: str) -> List[Dict]:
@@ -73,7 +73,7 @@ class NewsVerifier:
 
 def main() -> None:
     """Run main."""
-    verifier = NewsVerifier()
+    verifier = NewsVerifierPlaywright()
     print("\nVerifying December 18th, 2024 articles...")
     verifier.verify_coverage("2024-12-18")
 
