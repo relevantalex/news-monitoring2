@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import openai
 import re
 from urllib.parse import urlparse
-from database import init_db, save_article, get_articles_by_date, save_keyword, get_keywords, remove_keyword
+from database import init_db, save_article, get_articles_by_date, save_keyword, get_keywords, remove_keyword, get_scraped_dates
 import time
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -215,102 +215,68 @@ def display_agent_status(status_container, stats_container, phase, message, deta
             if details:
                 st.caption(details)
 
-def scrape_news(date):
-    default_keywords = [
-        "CIP", "Climate Investment Partnership", "기후투자동반자",
-        "그린수소", "재생에너지", "탄소중립", "에너지전환",
-        "해상풍력", "풍력발전", "신재생에너지", "재생에너지",
-        "해상풍력단지", "부유식", "고정식", "풍력",
-        "Copenhagen Infrastructure Partners", "Copenhagen Offshore Partners",
-        "코펜하겐 인프라스트럭처", "코펜하겐 오프쇼어"
-    ]
-    all_keywords = default_keywords + get_keywords()
-    total_keywords = len(all_keywords)
+def scrape_news(date_range):
+    """Scrape news for a date or range of dates"""
+    if isinstance(date_range, tuple):
+        start_date, end_date = date_range
+        current_date = start_date
+        while current_date <= end_date:
+            if current_date.weekday() < 5:  # Only weekdays
+                _scrape_single_date(current_date.strftime('%Y-%m-%d'))
+            current_date += timedelta(days=1)
+    else:
+        _scrape_single_date(date_range)
+
+def _scrape_single_date(target_date):
+    """Scrape news for a single date"""
+    status_container = st.empty()
+    stats_container = st.empty()
     
-    # Create persistent containers
-    metrics_container = st.container()
-    status_container = st.container()
-    details_container = st.container()
+    display_agent_status(status_container, stats_container, "Initialization", "Starting news scraping...")
     
-    # Initialize metrics
-    processed_articles = 0
-    relevant_articles = 0
-    sources_checked = set()
+    # Get all keywords
+    keywords = get_keywords()
+    if not keywords:
+        st.warning("⚠️ No keywords defined. Please add some keywords first.")
+        return
     
-    with metrics_container:
-        st.markdown("### 📊 Real-time Analysis Metrics")
-        metric_cols = st.columns(4)
+    # Initialize counters
+    total_articles = 0
+    saved_articles = 0
+    
+    # Search for each keyword
+    for keyword in keywords:
+        display_agent_status(status_container, stats_container, "Searching", f"Looking for articles with keyword: {keyword}")
         
-        # Initialize metric placeholders
-        keywords_metric = metric_cols[0].empty()
-        articles_metric = metric_cols[1].empty()
-        relevant_metric = metric_cols[2].empty()
-        sources_metric = metric_cols[3].empty()
-    
-    # Initialize AI Agent
-    display_agent_status(
-        status_container, 
-        details_container,
-        "initialize",
-        "🚀 AI News Analysis Agent Activated",
-        "Preparing to analyze Korean news sources..."
-    )
-    
-    # Process keywords
-    for idx, keyword in enumerate(all_keywords):
-        progress = (idx + 1) / total_keywords
-        
-        # Update search status
-        display_agent_status(
-            status_container,
-            details_container,
-            "search",
-            f"📡 Searching for articles related to: {keyword}",
-            f"Processing keyword {idx + 1} of {total_keywords}"
-        )
-        
-        articles = search_news(keyword, date.strftime('%Y-%m-%d'))
+        articles = search_news(keyword, target_date)
+        total_articles += len(articles)
         
         for article in articles:
-            processed_articles += 1
-            sources_checked.add(article.get('media_name', 'Unknown'))
-            
-            # Update analysis status
-            display_agent_status(
-                status_container,
-                details_container,
-                "analyze",
-                f"🔬 Analyzing Article",
-                f"Source: {article.get('media_name', 'Unknown')} | Title: {article['title'][:50]}..."
-            )
-            
-            # Get OpenAI analysis
-            analysis = get_analysis(article['title'])
-            article.update(analysis)
-            
-            if validate_news_relevance(article):
-                relevant_articles += 1
-                save_article(article)
-            
-            # Update metrics
-            keywords_metric.metric("🎯 Keywords", f"{idx + 1}/{total_keywords}")
-            articles_metric.metric("📰 Articles Found", processed_articles)
-            relevant_metric.metric("✨ Relevant Articles", relevant_articles)
-            sources_metric.metric("🗞️ Sources Checked", len(sources_checked))
+            if not validate_news_relevance(article):
+                continue
+                
+            try:
+                # Get OpenAI analysis
+                analysis = get_analysis(article['title'])
+                
+                # Add analysis results to article data
+                article.update(analysis)
+                
+                # Save to database
+                if save_article(article):
+                    saved_articles += 1
+                    
+            except Exception as e:
+                st.error(f"Error processing article: {str(e)}")
+                continue
     
     # Final status update
     display_agent_status(
         status_container,
-        details_container,
-        "complete",
-        "✨ News Analysis Complete",
-        f"""
-        Final Statistics:
-        • Keywords Processed: {total_keywords}
-        • Articles Analyzed: {processed_articles}
-        • Relevant Articles: {relevant_articles}
-        • News Sources: {len(sources_checked)}
-        """
+        stats_container,
+        "Complete",
+        f"✅ Scraping complete for {target_date}",
+        f"Found {total_articles} articles, saved {saved_articles} relevant ones."
     )
 
 def display_news(date):
@@ -382,27 +348,53 @@ def main():
     # Date selection at the top of sidebar
     st.sidebar.subheader("📅 Select Date")
     
-    # Generate dates (newest first)
-    today = datetime.now().date()
-    dates = []
-    current_date = today
-    for _ in range(7):
-        if current_date.weekday() < 5:  # Only weekdays
-            dates.append(current_date)
-        current_date = current_date - timedelta(days=1)
-    dates = sorted(dates, reverse=True)  # Sort dates newest first
+    # Date range selection
+    date_selection_mode = st.sidebar.radio("Date Selection Mode", ["Single Date", "Date Range"])
     
-    # Create date selection
-    selected_date = st.sidebar.selectbox(
-        "Choose a date",
-        dates,
-        format_func=lambda x: x.strftime('%Y-%m-%d (%A)')
-    )
+    today = datetime.now().date()
+    if date_selection_mode == "Single Date":
+        selected_date = st.sidebar.date_input(
+            "Choose a date",
+            today,
+            max_value=today
+        )
+    else:
+        col1, col2 = st.sidebar.columns(2)
+        start_date = col1.date_input(
+            "Start Date",
+            today - timedelta(days=7),
+            max_value=today
+        )
+        end_date = col2.date_input(
+            "End Date",
+            today,
+            min_value=start_date,
+            max_value=today
+        )
+        if start_date > end_date:
+            st.sidebar.error("End date must be after start date")
+            selected_date = None
+        else:
+            selected_date = (start_date, end_date)
+    
+    # Previously scraped dates dropdown
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📅 Previously Scraped")
+    scraped_dates = get_scraped_dates()
+    if scraped_dates:
+        selected_scraped_date = st.sidebar.selectbox(
+            "Select a date to view",
+            scraped_dates,
+            format_func=lambda x: datetime.strptime(x, '%Y-%m-%d').strftime('%Y-%m-%d (%A)')
+        )
+    else:
+        st.sidebar.text("No previously scraped dates")
+        selected_scraped_date = None
     
     st.sidebar.markdown("---")
     
     # Scrape News button
-    if st.sidebar.button("🔍 Scrape News"):
+    if selected_date and st.sidebar.button("🔍 Scrape News"):
         scrape_news(selected_date)
     
     # Add new keyword right under scrape news
@@ -454,7 +446,13 @@ def main():
         st.rerun()
     
     # Main content area
-    display_news(selected_date)
+    if selected_scraped_date:
+        display_news(selected_scraped_date)
+    elif isinstance(selected_date, tuple):
+        # For date range, show the most recent date's news
+        display_news(selected_date[1].strftime('%Y-%m-%d'))
+    else:
+        display_news(selected_date.strftime('%Y-%m-%d'))
 
 if __name__ == "__main__":
     main()

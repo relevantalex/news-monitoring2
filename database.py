@@ -101,3 +101,15 @@ def remove_keyword(keyword):
         return False
     finally:
         conn.close()
+
+def get_scraped_dates():
+    conn = sqlite3.connect('news_monitor.db')
+    c = conn.cursor()
+    try:
+        c.execute('SELECT DISTINCT date FROM news_articles ORDER BY date DESC')
+        dates = [row[0] for row in c.fetchall()]
+        return dates
+    except:
+        return []
+    finally:
+        conn.close()
